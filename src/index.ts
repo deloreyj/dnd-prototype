@@ -1,5 +1,6 @@
 import { DurableObject, WorkerEntrypoint } from 'cloudflare:workers';
 import { z } from 'zod';
+import { Dice } from './dice';
 
 const characterSchema = z.object({
 	name: z.string(),
@@ -83,6 +84,24 @@ type AbilityIndex = {
 	[key: string]: Ability;
 };
 
+enum StatName {
+	str,
+	dex,
+	con,
+	int,
+	wis,
+	cha
+}
+
+type Stat = {
+	raw: number;
+	bonus: number;
+}
+
+type StatIndex = {
+	[key in StatName]: Stat;
+}
+
 export class Character extends DurableObject {
 	name: string;
 	alignment: string;
@@ -106,7 +125,7 @@ export class Character extends DurableObject {
 	initialize(
 		name: string,
 		alignment: string,
-		stats: object,
+		stats: StatIndex,
 		backStory: string,
 		abilities: AbilityIndex,
 		hitPoints: number,
@@ -119,6 +138,10 @@ export class Character extends DurableObject {
 		this.abilities = abilities;
 		this.hitPoints = hitPoints;
 		this.movementSpeed = movementSpeed;
+
+		if (Object.keys(stats).length === 0) {
+			this.randomizeStats();
+		}
 	}
 
 	takeDamage(amount: number) {
@@ -137,13 +160,38 @@ export class Character extends DurableObject {
 		delete this.abilities[name];
 	}
 
-	updateStats(newStats: object) {
+	updateStats(newStats: StatIndex) {
 		this.stats = { ...this.stats, ...newStats };
 	}
 
 	move(distance: number) {
 		// TODO: Implement the logic for moving the character
 		console.log(`${this.name} moves ${distance} units at a speed of ${this.movementSpeed}.`);
+	}
+
+	randomizeStats() {
+		const roll4d6DropWorst = () => {
+			const rolls = [Dice.rolld6(), Dice.rolld6(), Dice.rolld6(), Dice.rolld6()];
+			const minRoll = Math.min(...rolls);
+			return rolls.reduce((accumulator, currentValue) => accumulator + currentValue, 0) - minRoll;
+		}
+		const randomizedStats : StatIndex = {
+			[StatName.str]: {raw: 10, bonus: 0},
+			[StatName.dex]: {raw: 10, bonus: 0},
+			[StatName.con]: {raw: 10, bonus: 0},
+			[StatName.int]: {raw: 10, bonus: 0},
+			[StatName.wis]: {raw: 10, bonus: 0},
+			[StatName.cha]: {raw: 10, bonus: 0}
+		}
+
+		for (const stat in StatName) {
+			const statKey = stat as unknown as StatName;
+			const roll = roll4d6DropWorst();
+			randomizedStats[statKey].raw = roll;
+			randomizedStats[statKey].bonus = Math.floor((roll - 10) / 2);
+		}
+
+		this.updateStats(randomizedStats);
 	}
 }
 
