@@ -148,6 +148,13 @@ export class Character extends DurableObject {
 }
 
 export default class DNDPartyWorker extends WorkerEntrypoint<Env> {
+	env: Env;
+
+	constructor(ctx: ExecutionContext, env: Env) {
+		super(ctx, env);
+		this.env = env;
+	}
+
 	async fetch(request: Request) {
 		const url = new URL(request.url);
 		const characterName = url.searchParams.get('name');
