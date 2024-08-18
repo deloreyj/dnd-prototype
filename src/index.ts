@@ -5,11 +5,14 @@ import { Dice } from './dice';
 const characterSchema = z.object({
 	name: z.string(),
 	alignment: z.string(),
-	stats: z.object({}).passthrough(),
+	stats: z.any(), // TODO: Add stats schema
 	backStory: z.string(),
 	abilities: z.any(), // TODO: Add ability schema
 	hitPoints: z.number(),
 	movementSpeed: z.number(),
+	skills: z.object({}).passthrough(),
+	proficiencyBonus: z.number(),
+	skillProficiencies: z.any(), // TODO: Add skillProficiencies schema
 });
 
 /**
@@ -85,31 +88,67 @@ type AbilityIndex = {
 };
 
 enum StatName {
-	str,
-	dex,
-	con,
-	int,
-	wis,
-	cha
+	STR,
+	DEX,
+	CON,
+	INT,
+	WIS,
+	CHA
 }
 
 type Stat = {
 	raw: number;
 	bonus: number;
-}
+};
 
 type StatIndex = {
-	[key in StatName]: Stat;
-}
+	[key in keyof StatName as string]: Stat;
+};
+
+const SkillNameToStatNameMap = {
+	ACROBATICS: StatName.DEX,
+	ANIMAL_HANDLING: StatName.WIS,
+	ARCANA: StatName.INT,
+	ATHLETICS: StatName.STR,
+	DECEPTION: StatName.CHA,
+	HISTORY: StatName.INT,
+	INSIGHT: StatName.WIS,
+	INTIMIDATION: StatName.CHA,
+	INVESTIGATION: StatName.INT,
+	MEDICINE: StatName.WIS,
+	NATURE: StatName.INT,
+	PERCEPTION: StatName.WIS,
+	PERFORMANCE: StatName.CHA,
+	PERSUASION: StatName.CHA,
+	RELIGION: StatName.INT,
+	SLEIGHT_OF_HAND: StatName.DEX,
+	STEALTH: StatName.DEX,
+	SURVIVAL: StatName.WIS,
+} as const;
+
+type Skill = {
+	drivingStat: StatName,
+	proficient: boolean,
+	value: number,
+	passiveValue: number,
+};
+
+type SkillIndex = {
+	[key in keyof typeof SkillNameToStatNameMap as string]: Skill;
+};
+
+type SkillProficiencySet = keyof StatName;
 
 export class Character extends DurableObject {
 	name: string;
 	alignment: string;
-	stats: object;
+	stats: StatIndex;
 	backStory: string;
 	abilities: AbilityIndex;
 	hitPoints: number;
 	movementSpeed: number;
+	proficiencyBonus: number;
+	skills: SkillIndex;
 
 	constructor(ctx: DurableObjectState, env: Env) {
 		super(ctx, env);
@@ -120,6 +159,8 @@ export class Character extends DurableObject {
 		this.abilities = {};
 		this.hitPoints = 0;
 		this.movementSpeed = 0;
+		this.proficiencyBonus = 2;
+		this.skills = {};
 	}
 
 	initialize(
@@ -129,18 +170,22 @@ export class Character extends DurableObject {
 		backStory: string,
 		abilities: AbilityIndex,
 		hitPoints: number,
-		movementSpeed: number
+		movementSpeed: number,
+		proficiencyBonus: number,
+		skillProficiencies: SkillProficiencySet,
 	) {
 		this.name = name;
 		this.alignment = alignment;
-		this.stats = stats;
 		this.backStory = backStory;
 		this.abilities = abilities;
 		this.hitPoints = hitPoints;
 		this.movementSpeed = movementSpeed;
+		this.proficiencyBonus = proficiencyBonus;
 
 		if (Object.keys(stats).length === 0) {
 			this.randomizeStats();
+		} else {
+			this.updateStatsAndSkills(stats, skillProficiencies);
 		}
 	}
 
@@ -160,13 +205,36 @@ export class Character extends DurableObject {
 		delete this.abilities[name];
 	}
 
-	updateStats(newStats: StatIndex) {
+	updateStatsAndSkills(newStats: StatIndex, skillProficiencies?: SkillProficiencySet) {
 		this.stats = { ...this.stats, ...newStats };
+		//for each skill in our map
+		for (const skillName in SkillNameToStatNameMap) {
+			//get the key from the map
+			const skillNameKey = skillName as keyof typeof SkillNameToStatNameMap;
+
+			//we need to calculate proficiency and modify the value up front so we can set both later
+			const isProficient = (skillProficiencies && Object.keys(skillProficiencies).includes(skillNameKey)) as boolean
+			const drivingStatBonus = this.stats[SkillNameToStatNameMap[skillNameKey]].bonus;
+			const skillBonus = isProficient ? drivingStatBonus + this.proficiencyBonus : drivingStatBonus;
+
+			//set the skill in the skills index based on the proper stat
+			this.skills[skillNameKey] = {
+				//define the driving stat based on the map
+				drivingStat: SkillNameToStatNameMap[skillNameKey],
+				proficient: isProficient,
+				value: skillBonus,
+				passiveValue: skillBonus + 10,
+			}
+		}
 	}
 
 	move(distance: number) {
 		// TODO: Implement the logic for moving the character
 		console.log(`${this.name} moves ${distance} units at a speed of ${this.movementSpeed}.`);
+	}
+
+	updateProficiencyBonus(proficiencyBonus: number) {
+		this.proficiencyBonus = proficiencyBonus;
 	}
 
 	randomizeStats() {
@@ -176,13 +244,13 @@ export class Character extends DurableObject {
 			return rolls.reduce((accumulator, currentValue) => accumulator + currentValue, 0) - minRoll;
 		}
 		const randomizedStats : StatIndex = {
-			[StatName.str]: {raw: 10, bonus: 0},
-			[StatName.dex]: {raw: 10, bonus: 0},
-			[StatName.con]: {raw: 10, bonus: 0},
-			[StatName.int]: {raw: 10, bonus: 0},
-			[StatName.wis]: {raw: 10, bonus: 0},
-			[StatName.cha]: {raw: 10, bonus: 0}
-		}
+			[StatName.STR]: {raw: 10, bonus: 0},
+			[StatName.DEX]: {raw: 10, bonus: 0},
+			[StatName.CON]: {raw: 10, bonus: 0},
+			[StatName.INT]: {raw: 10, bonus: 0},
+			[StatName.WIS]: {raw: 10, bonus: 0},
+			[StatName.CHA]: {raw: 10, bonus: 0}
+		};
 
 		for (const stat in StatName) {
 			const statKey = stat as unknown as StatName;
@@ -191,7 +259,7 @@ export class Character extends DurableObject {
 			randomizedStats[statKey].bonus = Math.floor((roll - 10) / 2);
 		}
 
-		this.updateStats(randomizedStats);
+		this.updateStatsAndSkills(randomizedStats);
 	}
 }
 
@@ -210,7 +278,7 @@ export default class DNDPartyWorker extends WorkerEntrypoint<Env> {
 
 	async createCharacter(request: Request) {
 		const parsedData = characterSchema.parse(await request.json());
-		const { name, alignment, stats, backStory, abilities, hitPoints, movementSpeed } = parsedData;
+		const { name, alignment, stats, backStory, abilities, hitPoints, movementSpeed, proficiencyBonus, skillProficiencies} = parsedData;
 
 		if (!name) {
 			return new Response('Character name is required', { status: 400 });
@@ -218,7 +286,7 @@ export default class DNDPartyWorker extends WorkerEntrypoint<Env> {
 
 		const id = this.env.CHARACTERS.idFromName(name);
 		const stub = await this.env.CHARACTERS.get(id);
-		await stub.initialize(name, alignment, stats, backStory, abilities, hitPoints, movementSpeed);
+		await stub.initialize(name, alignment, stats, backStory, abilities, hitPoints, movementSpeed, proficiencyBonus, skillProficiencies);
 
 		return new Response('Character created successfully', { status: 201 });
 	}
