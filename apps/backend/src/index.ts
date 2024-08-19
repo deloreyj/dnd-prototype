@@ -1,7 +1,8 @@
-import { DurableObject, WorkerEntrypoint } from 'cloudflare:workers';
+import { DurableObjectNamespace, DurableObjectState } from '@cloudflare/workers-types';
 import { z } from 'zod';
 import { Dice } from './dice';
 import { Ability, AbilityIndex, SkillIndex, SkillNameToStatNameMap, SkillProficiencySet, StatIndex, StatName } from './charactertypes';
+import { DurableObject, WorkerEntrypoint } from 'cloudflare:workers';
 
 const characterSchema = z.object({
 	name: z.string(),
@@ -49,34 +50,34 @@ export interface Env {
 	// MY_QUEUE: Queue;
 
 	/**
- * Encounter class
- * Keep track of turn order and current active character
- * Keep track of the current scene and the characters in the scene
- * -- This will include the grid of the scene and the placement of the characters, obstacles, elevation, etc so that we can calculate
- * Keep track of the current round and the actions taken in the current round
- */
-/**
- * The Character class represents a character in a Dungeons and Dragons campaign.
- *
- * Properties:
- * - name: string - The name of the character.
- * - alignment: string - The alignment of the character (e.g., Lawful Good, Chaotic Evil).
- * - stats: object - An object containing the character's stats (e.g., strength, dexterity, constitution, intelligence, wisdom, charisma).
- * - backStory: string - A brief back story of the character.
- * - abilities: object - An object containing the character's regular and magical abilities.
- * - hitPoints: number - The current hit points of the character.
- *
- * Methods:
- * - constructor(name: string, alignment: string, stats: object, backStory: string, abilities: object, hitPoints: number) - Initializes a new character with the given properties.
- * - takeDamage(amount: number) - Reduces the character's hit points by the given amount.
- * - heal(amount: number) - Increases the character's hit points by the given amount.
- * - addAbility(name: string, description: string) - Adds a new ability to the character.
- * - removeAbility(name: string) - Removes an ability from the character.
- * - updateStats(newStats: object) - Updates the character's stats with the given new stats.
- */
+	 * Encounter class
+	 * Keep track of turn order and current active character
+	 * Keep track of the current scene and the characters in the scene
+	 * -- This will include the grid of the scene and the placement of the characters, obstacles, elevation, etc so that we can calculate
+	 * Keep track of the current round and the actions taken in the current round
+	 */
+	/**
+	 * The Character class represents a character in a Dungeons and Dragons campaign.
+	 *
+	 * Properties:
+	 * - name: string - The name of the character.
+	 * - alignment: string - The alignment of the character (e.g., Lawful Good, Chaotic Evil).
+	 * - stats: object - An object containing the character's stats (e.g., strength, dexterity, constitution, intelligence, wisdom, charisma).
+	 * - backStory: string - A brief back story of the character.
+	 * - abilities: object - An object containing the character's regular and magical abilities.
+	 * - hitPoints: number - The current hit points of the character.
+	 *
+	 * Methods:
+	 * - constructor(name: string, alignment: string, stats: object, backStory: string, abilities: object, hitPoints: number) - Initializes a new character with the given properties.
+	 * - takeDamage(amount: number) - Reduces the character's hit points by the given amount.
+	 * - heal(amount: number) - Increases the character's hit points by the given amount.
+	 * - addAbility(name: string, description: string) - Adds a new ability to the character.
+	 * - removeAbility(name: string) - Removes an ability from the character.
+	 * - updateStats(newStats: object) - Updates the character's stats with the given new stats.
+	 */
 }
 
-export class Character extends DurableObject {
+export class Character extends DurableObject<Env> {
 	name: string;
 	alignment: string;
 	stats: StatIndex;
@@ -109,7 +110,7 @@ export class Character extends DurableObject {
 		hitPoints: number,
 		movementSpeed: number,
 		proficiencyBonus?: number,
-		skillProficiencies?: SkillProficiencySet,
+		skillProficiencies?: SkillProficiencySet
 	) {
 		this.name = name;
 		this.alignment = alignment;
@@ -117,7 +118,11 @@ export class Character extends DurableObject {
 		this.abilities = abilities;
 		this.hitPoints = hitPoints;
 		this.movementSpeed = movementSpeed;
-		if (proficiencyBonus){ this.proficiencyBonus = proficiencyBonus } else { this.proficiencyBonus = 2 };
+		if (proficiencyBonus) {
+			this.proficiencyBonus = proficiencyBonus;
+		} else {
+			this.proficiencyBonus = 2;
+		}
 
 		if (Object.keys(stats).length === 0) {
 			this.randomizeStats(skillProficiencies);
@@ -150,7 +155,7 @@ export class Character extends DurableObject {
 			const skillNameKey = skillName as keyof typeof SkillNameToStatNameMap;
 
 			//we need to calculate proficiency and modify the value up front so we can set both later
-			const isProficient = (skillProficiencies && Object.keys(skillProficiencies).includes(skillNameKey)) as boolean
+			const isProficient = (skillProficiencies && Object.keys(skillProficiencies).includes(skillNameKey)) as boolean;
 			const drivingStatBonus = this.stats[SkillNameToStatNameMap[skillNameKey]].bonus;
 			const skillBonus = isProficient ? drivingStatBonus + this.proficiencyBonus : drivingStatBonus;
 
@@ -161,7 +166,7 @@ export class Character extends DurableObject {
 				proficient: isProficient,
 				value: skillBonus,
 				passiveValue: skillBonus + 10,
-			}
+			};
 		}
 	}
 
@@ -179,14 +184,14 @@ export class Character extends DurableObject {
 			const rolls = [Dice.rolld6(), Dice.rolld6(), Dice.rolld6(), Dice.rolld6()];
 			const minRoll = Math.min(...rolls);
 			return rolls.reduce((accumulator, currentValue) => accumulator + currentValue, 0) - minRoll;
-		}
-		const randomizedStats : StatIndex = {
-			[StatName.STR]: {raw: 10, bonus: 0},
-			[StatName.DEX]: {raw: 10, bonus: 0},
-			[StatName.CON]: {raw: 10, bonus: 0},
-			[StatName.INT]: {raw: 10, bonus: 0},
-			[StatName.WIS]: {raw: 10, bonus: 0},
-			[StatName.CHA]: {raw: 10, bonus: 0}
+		};
+		const randomizedStats: StatIndex = {
+			[StatName.STR]: { raw: 10, bonus: 0 },
+			[StatName.DEX]: { raw: 10, bonus: 0 },
+			[StatName.CON]: { raw: 10, bonus: 0 },
+			[StatName.INT]: { raw: 10, bonus: 0 },
+			[StatName.WIS]: { raw: 10, bonus: 0 },
+			[StatName.CHA]: { raw: 10, bonus: 0 },
 		};
 
 		for (const stat in StatName) {
@@ -199,7 +204,7 @@ export class Character extends DurableObject {
 			} else {
 				randomizedStats[statKey] = {
 					raw: roll,
-					bonus: bonus	
+					bonus: bonus,
 				};
 			}
 		}
@@ -209,13 +214,6 @@ export class Character extends DurableObject {
 }
 
 export default class DNDPartyWorker extends WorkerEntrypoint<Env> {
-	env: Env;
-
-	constructor(ctx: ExecutionContext, env: Env) {
-		super(ctx, env);
-		this.env = env;
-	}
-
 	async fetch(request: Request) {
 		const url = new URL(request.url);
 		const characterName = url.searchParams.get('name');
@@ -230,7 +228,7 @@ export default class DNDPartyWorker extends WorkerEntrypoint<Env> {
 
 	async createCharacter(request: Request) {
 		const parsedData = characterSchema.parse(await request.json());
-		const { name, alignment, stats, backStory, abilities, hitPoints, movementSpeed, proficiencyBonus, skillProficiencies} = parsedData;
+		const { name, alignment, stats, backStory, abilities, hitPoints, movementSpeed, proficiencyBonus, skillProficiencies } = parsedData;
 
 		if (!name) {
 			return new Response('Character name is required', { status: 400 });
