@@ -11,21 +11,7 @@ jest.mock('cloudflare:workers', () => {
 import { Character } from './index'; // Adjust the path
 import DNDPartyWorker from './index';
 import { Env } from './index';
-
-// Define the StatIndex type if it's used in your Character class
-type Stat = {
-  raw: number;
-  bonus: number;
-};
-
-type StatIndex = {
-  str: Stat;
-  dex: Stat;
-  con: Stat;
-  int: Stat;
-  wis: Stat;
-  cha: Stat;
-};
+import { Ability, AbilityIndex, SkillIndex, SkillNameToStatNameMap, SkillProficiencySet, StatIndex, StatName } from './charactertypes';
 
 describe('Character Class', () => {
   let character: Character;

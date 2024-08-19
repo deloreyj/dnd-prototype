@@ -1,6 +1,7 @@
 import { DurableObject, WorkerEntrypoint } from 'cloudflare:workers';
 import { z } from 'zod';
 import { Dice } from './dice';
+import { Ability, AbilityIndex, SkillIndex, SkillNameToStatNameMap, SkillProficiencySet, StatIndex, StatName } from './charactertypes';
 
 const characterSchema = z.object({
 	name: z.string(),
@@ -10,9 +11,9 @@ const characterSchema = z.object({
 	abilities: z.any(), // TODO: Add ability schema
 	hitPoints: z.number(),
 	movementSpeed: z.number(),
-	skills: z.object({}).passthrough(),
-	proficiencyBonus: z.number(),
-	skillProficiencies: z.any(), // TODO: Add skillProficiencies schema
+	skills: z.object({}).passthrough().optional(),
+	proficiencyBonus: z.number().optional(),
+	skillProficiencies: z.any().optional(), // TODO: Add skillProficiencies schema
 });
 
 /**
@@ -46,16 +47,14 @@ export interface Env {
 	//
 	// Example binding to a Queue. Learn more at https://developers.cloudflare.com/queues/javascript-apis/
 	// MY_QUEUE: Queue;
-}
 
-/**
+	/**
  * Encounter class
  * Keep track of turn order and current active character
  * Keep track of the current scene and the characters in the scene
  * -- This will include the grid of the scene and the placement of the characters, obstacles, elevation, etc so that we can calculate
  * Keep track of the current round and the actions taken in the current round
  */
-
 /**
  * The Character class represents a character in a Dungeons and Dragons campaign.
  *
@@ -75,69 +74,7 @@ export interface Env {
  * - removeAbility(name: string) - Removes an ability from the character.
  * - updateStats(newStats: object) - Updates the character's stats with the given new stats.
  */
-
-type Ability = {
-	name: string;
-	description: string;
-	usesLeft: number;
-	effect: string;
-};
-
-type AbilityIndex = {
-	[key: string]: Ability;
-};
-
-enum StatName {
-	STR,
-	DEX,
-	CON,
-	INT,
-	WIS,
-	CHA
 }
-
-type Stat = {
-	raw: number;
-	bonus: number;
-};
-
-type StatIndex = {
-	[key in keyof StatName as string]: Stat;
-};
-
-const SkillNameToStatNameMap = {
-	ACROBATICS: StatName.DEX,
-	ANIMAL_HANDLING: StatName.WIS,
-	ARCANA: StatName.INT,
-	ATHLETICS: StatName.STR,
-	DECEPTION: StatName.CHA,
-	HISTORY: StatName.INT,
-	INSIGHT: StatName.WIS,
-	INTIMIDATION: StatName.CHA,
-	INVESTIGATION: StatName.INT,
-	MEDICINE: StatName.WIS,
-	NATURE: StatName.INT,
-	PERCEPTION: StatName.WIS,
-	PERFORMANCE: StatName.CHA,
-	PERSUASION: StatName.CHA,
-	RELIGION: StatName.INT,
-	SLEIGHT_OF_HAND: StatName.DEX,
-	STEALTH: StatName.DEX,
-	SURVIVAL: StatName.WIS,
-} as const;
-
-type Skill = {
-	drivingStat: StatName,
-	proficient: boolean,
-	value: number,
-	passiveValue: number,
-};
-
-type SkillIndex = {
-	[key in keyof typeof SkillNameToStatNameMap as string]: Skill;
-};
-
-type SkillProficiencySet = keyof StatName;
 
 export class Character extends DurableObject {
 	name: string;
@@ -171,8 +108,8 @@ export class Character extends DurableObject {
 		abilities: AbilityIndex,
 		hitPoints: number,
 		movementSpeed: number,
-		proficiencyBonus: number,
-		skillProficiencies: SkillProficiencySet,
+		proficiencyBonus?: number,
+		skillProficiencies?: SkillProficiencySet,
 	) {
 		this.name = name;
 		this.alignment = alignment;
@@ -180,10 +117,10 @@ export class Character extends DurableObject {
 		this.abilities = abilities;
 		this.hitPoints = hitPoints;
 		this.movementSpeed = movementSpeed;
-		this.proficiencyBonus = proficiencyBonus;
+		if (proficiencyBonus){ this.proficiencyBonus = proficiencyBonus } else { this.proficiencyBonus = 2 };
 
 		if (Object.keys(stats).length === 0) {
-			this.randomizeStats();
+			this.randomizeStats(skillProficiencies);
 		} else {
 			this.updateStatsAndSkills(stats, skillProficiencies);
 		}
@@ -237,7 +174,7 @@ export class Character extends DurableObject {
 		this.proficiencyBonus = proficiencyBonus;
 	}
 
-	randomizeStats() {
+	randomizeStats(skillProficiencies?: SkillProficiencySet) {
 		const roll4d6DropWorst = () => {
 			const rolls = [Dice.rolld6(), Dice.rolld6(), Dice.rolld6(), Dice.rolld6()];
 			const minRoll = Math.min(...rolls);
@@ -255,11 +192,19 @@ export class Character extends DurableObject {
 		for (const stat in StatName) {
 			const statKey = stat as unknown as StatName;
 			const roll = roll4d6DropWorst();
-			randomizedStats[statKey].raw = roll;
-			randomizedStats[statKey].bonus = Math.floor((roll - 10) / 2);
+			const bonus = Math.floor((roll - 10) / 2);
+			if (randomizedStats[statKey]) {
+				randomizedStats[statKey].raw = roll;
+				randomizedStats[statKey].bonus = bonus;
+			} else {
+				randomizedStats[statKey] = {
+					raw: roll,
+					bonus: bonus	
+				};
+			}
 		}
 
-		this.updateStatsAndSkills(randomizedStats);
+		this.updateStatsAndSkills(randomizedStats, skillProficiencies);
 	}
 }
 
