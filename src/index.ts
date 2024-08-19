@@ -1,14 +1,19 @@
 import { DurableObject, WorkerEntrypoint } from 'cloudflare:workers';
 import { z } from 'zod';
+import { Dice } from './dice';
+import { Ability, AbilityIndex, SkillIndex, SkillNameToStatNameMap, SkillProficiencySet, StatIndex, StatName } from './charactertypes';
 
 const characterSchema = z.object({
 	name: z.string(),
 	alignment: z.string(),
-	stats: z.object({}).passthrough(),
+	stats: z.any(), // TODO: Add stats schema
 	backStory: z.string(),
 	abilities: z.any(), // TODO: Add ability schema
 	hitPoints: z.number(),
 	movementSpeed: z.number(),
+	skills: z.object({}).passthrough().optional(),
+	proficiencyBonus: z.number().optional(),
+	skillProficiencies: z.any().optional(), // TODO: Add skillProficiencies schema
 });
 
 /**
@@ -42,16 +47,14 @@ export interface Env {
 	//
 	// Example binding to a Queue. Learn more at https://developers.cloudflare.com/queues/javascript-apis/
 	// MY_QUEUE: Queue;
-}
 
-/**
+	/**
  * Encounter class
  * Keep track of turn order and current active character
  * Keep track of the current scene and the characters in the scene
  * -- This will include the grid of the scene and the placement of the characters, obstacles, elevation, etc so that we can calculate
  * Keep track of the current round and the actions taken in the current round
  */
-
 /**
  * The Character class represents a character in a Dungeons and Dragons campaign.
  *
@@ -71,26 +74,18 @@ export interface Env {
  * - removeAbility(name: string) - Removes an ability from the character.
  * - updateStats(newStats: object) - Updates the character's stats with the given new stats.
  */
-
-type Ability = {
-	name: string;
-	description: string;
-	usesLeft: number;
-	effect: string;
-};
-
-type AbilityIndex = {
-	[key: string]: Ability;
-};
+}
 
 export class Character extends DurableObject {
 	name: string;
 	alignment: string;
-	stats: object;
+	stats: StatIndex;
 	backStory: string;
 	abilities: AbilityIndex;
 	hitPoints: number;
 	movementSpeed: number;
+	proficiencyBonus: number;
+	skills: SkillIndex;
 
 	constructor(ctx: DurableObjectState, env: Env) {
 		super(ctx, env);
@@ -101,24 +96,34 @@ export class Character extends DurableObject {
 		this.abilities = {};
 		this.hitPoints = 0;
 		this.movementSpeed = 0;
+		this.proficiencyBonus = 2;
+		this.skills = {};
 	}
 
 	initialize(
 		name: string,
 		alignment: string,
-		stats: object,
+		stats: StatIndex,
 		backStory: string,
 		abilities: AbilityIndex,
 		hitPoints: number,
-		movementSpeed: number
+		movementSpeed: number,
+		proficiencyBonus?: number,
+		skillProficiencies?: SkillProficiencySet,
 	) {
 		this.name = name;
 		this.alignment = alignment;
-		this.stats = stats;
 		this.backStory = backStory;
 		this.abilities = abilities;
 		this.hitPoints = hitPoints;
 		this.movementSpeed = movementSpeed;
+		if (proficiencyBonus){ this.proficiencyBonus = proficiencyBonus } else { this.proficiencyBonus = 2 };
+
+		if (Object.keys(stats).length === 0) {
+			this.randomizeStats(skillProficiencies);
+		} else {
+			this.updateStatsAndSkills(stats, skillProficiencies);
+		}
 	}
 
 	takeDamage(amount: number) {
@@ -137,17 +142,80 @@ export class Character extends DurableObject {
 		delete this.abilities[name];
 	}
 
-	updateStats(newStats: object) {
+	updateStatsAndSkills(newStats: StatIndex, skillProficiencies?: SkillProficiencySet) {
 		this.stats = { ...this.stats, ...newStats };
+		//for each skill in our map
+		for (const skillName in SkillNameToStatNameMap) {
+			//get the key from the map
+			const skillNameKey = skillName as keyof typeof SkillNameToStatNameMap;
+
+			//we need to calculate proficiency and modify the value up front so we can set both later
+			const isProficient = (skillProficiencies && Object.keys(skillProficiencies).includes(skillNameKey)) as boolean
+			const drivingStatBonus = this.stats[SkillNameToStatNameMap[skillNameKey]].bonus;
+			const skillBonus = isProficient ? drivingStatBonus + this.proficiencyBonus : drivingStatBonus;
+
+			//set the skill in the skills index based on the proper stat
+			this.skills[skillNameKey] = {
+				//define the driving stat based on the map
+				drivingStat: SkillNameToStatNameMap[skillNameKey],
+				proficient: isProficient,
+				value: skillBonus,
+				passiveValue: skillBonus + 10,
+			}
+		}
 	}
 
 	move(distance: number) {
 		// TODO: Implement the logic for moving the character
 		console.log(`${this.name} moves ${distance} units at a speed of ${this.movementSpeed}.`);
 	}
+
+	updateProficiencyBonus(proficiencyBonus: number) {
+		this.proficiencyBonus = proficiencyBonus;
+	}
+
+	randomizeStats(skillProficiencies?: SkillProficiencySet) {
+		const roll4d6DropWorst = () => {
+			const rolls = [Dice.rolld6(), Dice.rolld6(), Dice.rolld6(), Dice.rolld6()];
+			const minRoll = Math.min(...rolls);
+			return rolls.reduce((accumulator, currentValue) => accumulator + currentValue, 0) - minRoll;
+		}
+		const randomizedStats : StatIndex = {
+			[StatName.STR]: {raw: 10, bonus: 0},
+			[StatName.DEX]: {raw: 10, bonus: 0},
+			[StatName.CON]: {raw: 10, bonus: 0},
+			[StatName.INT]: {raw: 10, bonus: 0},
+			[StatName.WIS]: {raw: 10, bonus: 0},
+			[StatName.CHA]: {raw: 10, bonus: 0}
+		};
+
+		for (const stat in StatName) {
+			const statKey = stat as unknown as StatName;
+			const roll = roll4d6DropWorst();
+			const bonus = Math.floor((roll - 10) / 2);
+			if (randomizedStats[statKey]) {
+				randomizedStats[statKey].raw = roll;
+				randomizedStats[statKey].bonus = bonus;
+			} else {
+				randomizedStats[statKey] = {
+					raw: roll,
+					bonus: bonus	
+				};
+			}
+		}
+
+		this.updateStatsAndSkills(randomizedStats, skillProficiencies);
+	}
 }
 
 export default class DNDPartyWorker extends WorkerEntrypoint<Env> {
+	env: Env;
+
+	constructor(ctx: ExecutionContext, env: Env) {
+		super(ctx, env);
+		this.env = env;
+	}
+
 	async fetch(request: Request) {
 		const url = new URL(request.url);
 		const characterName = url.searchParams.get('name');
@@ -162,7 +230,7 @@ export default class DNDPartyWorker extends WorkerEntrypoint<Env> {
 
 	async createCharacter(request: Request) {
 		const parsedData = characterSchema.parse(await request.json());
-		const { name, alignment, stats, backStory, abilities, hitPoints, movementSpeed } = parsedData;
+		const { name, alignment, stats, backStory, abilities, hitPoints, movementSpeed, proficiencyBonus, skillProficiencies} = parsedData;
 
 		if (!name) {
 			return new Response('Character name is required', { status: 400 });
@@ -170,7 +238,7 @@ export default class DNDPartyWorker extends WorkerEntrypoint<Env> {
 
 		const id = this.env.CHARACTERS.idFromName(name);
 		const stub = await this.env.CHARACTERS.get(id);
-		await stub.initialize(name, alignment, stats, backStory, abilities, hitPoints, movementSpeed);
+		await stub.initialize(name, alignment, stats, backStory, abilities, hitPoints, movementSpeed, proficiencyBonus, skillProficiencies);
 
 		return new Response('Character created successfully', { status: 201 });
 	}
