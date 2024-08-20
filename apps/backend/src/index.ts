@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
-import { Character, characterSchema } from './Character';
+import { Character } from './Character';
 import { zValidator } from '@hono/zod-validator';
 import { Ai } from '@cloudflare/workers-types';
+import { CharacterSchema } from './types';
 
 export interface Env {
 	CHARACTERS: DurableObjectNamespace<Character>;
@@ -10,8 +11,8 @@ export interface Env {
 
 const app = new Hono<{ Bindings: Env }>();
 
-app.get('/character', async (c) => {
-	const characterName = c.req.query('name');
+app.get('/characters/:characterName', async (c) => {
+	const characterName = c.req.param('characterName');
 	if (!characterName) {
 		return c.text('Character name is required', 400);
 	}
@@ -19,7 +20,6 @@ app.get('/character', async (c) => {
 
 	const id = c.env.CHARACTERS.idFromName(characterName);
 	const stub = await c.env.CHARACTERS.get(id);
-	stub.initialize("Lil' Tex", 'Chaotic Evil', {}, 'Mock Backstory', {}, 10, 30, 'I look like woody from toy story', 2);
 	return c.json(await stub.toJSON());
 });
 
@@ -30,7 +30,19 @@ app.get('/characters/:characterName/image', async (c) => {
 	}
 
 	const id = c.env.CHARACTERS.idFromName(characterName);
-	const stub = await c.env.CHARACTERS.get(id);
+	const stub = c.env.CHARACTERS.get(id);
+	stub.initialize({
+		name: "Lil' Tex",
+		alignment: 'Chaotic Evil',
+		stats: {},
+		backStory: 'Mock Backstory',
+		abilities: {},
+		hitPoints: 10,
+		movementSpeed: 30,
+		physicalDescription: 'I look like woody from toy story',
+		proficiencyBonus: 2,
+		race: 'Dwarf',
+	});
 	const image = await stub.getImage();
 	return new Response(image, {
 		status: 200,
@@ -40,8 +52,8 @@ app.get('/characters/:characterName/image', async (c) => {
 	});
 });
 
-app.post('/character', zValidator('json', characterSchema), async (c) => {
-	const { name, alignment, stats, backStory, abilities, hitPoints, movementSpeed, physicalDescription, proficiencyBonus } =
+app.post('/character', zValidator('json', CharacterSchema), async (c) => {
+	const { name, alignment, stats, backStory, abilities, hitPoints, movementSpeed, physicalDescription, proficiencyBonus, race } =
 		c.req.valid('json');
 
 	if (!name) {
@@ -50,7 +62,18 @@ app.post('/character', zValidator('json', characterSchema), async (c) => {
 
 	const id = c.env.CHARACTERS.idFromName(name);
 	const stub = await c.env.CHARACTERS.get(id);
-	await stub.initialize(name, alignment, stats, backStory, abilities, hitPoints, movementSpeed, physicalDescription, proficiencyBonus);
+	await stub.initialize({
+		name,
+		alignment,
+		stats,
+		backStory,
+		abilities,
+		hitPoints,
+		movementSpeed,
+		physicalDescription,
+		proficiencyBonus,
+		race,
+	});
 
 	return c.text('Character created successfully', 201);
 });

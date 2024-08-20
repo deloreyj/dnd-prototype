@@ -1,22 +1,17 @@
 import { DurableObjectState } from '@cloudflare/workers-types';
 import { Dice } from './dice';
-import { Ability, AbilityIndex, SkillIndex, SkillNameToStatNameMap, SkillProficiencySet, StatIndex, StatName } from './charactertypes';
-import { DurableObject, WorkerEntrypoint } from 'cloudflare:workers';
-import { z } from 'zod';
-
-export const characterSchema = z.object({
-	name: z.string(),
-	alignment: z.string(),
-	stats: z.any(), // TODO: Add stats schema
-	backStory: z.string(),
-	abilities: z.any(), // TODO: Add ability schema
-	hitPoints: z.number(),
-	movementSpeed: z.number(),
-	skills: z.object({}).passthrough().optional(),
-	proficiencyBonus: z.number().optional(),
-	skillProficiencies: z.any().optional(), // TODO: Add skillProficiencies schema
-	physicalDescription: z.string().optional(),
-});
+import {
+	Ability,
+	AbilityIndex,
+	CharacterJSON,
+	Race,
+	SkillIndex,
+	SkillNameToStatNameMap,
+	SkillProficiencySet,
+	StatIndex,
+	StatName,
+} from './types';
+import { DurableObject } from 'cloudflare:workers';
 
 export class Character extends DurableObject<Env> {
 	name: string;
@@ -29,6 +24,8 @@ export class Character extends DurableObject<Env> {
 	physicalDescription?: string;
 	proficiencyBonus: number;
 	skills: SkillIndex;
+	race: Race;
+	skillProficiencies?: SkillProficiencySet;
 
 	constructor(ctx: DurableObjectState, env: Env) {
 		super(ctx, env);
@@ -42,20 +39,23 @@ export class Character extends DurableObject<Env> {
 		this.physicalDescription = '';
 		this.proficiencyBonus = 2;
 		this.skills = {};
+		this.race = 'Human'; // Default race
+		this.skillProficiencies = undefined;
 	}
 
-	initialize(
-		name: string,
-		alignment: string,
-		stats: StatIndex,
-		backStory: string,
-		abilities: AbilityIndex,
-		hitPoints: number,
-		movementSpeed: number,
-		physicalDescription?: string,
-		proficiencyBonus?: number,
-		skillProficiencies?: SkillProficiencySet
-	) {
+	initialize({
+		name,
+		alignment,
+		stats,
+		backStory,
+		abilities,
+		hitPoints,
+		movementSpeed,
+		physicalDescription,
+		race,
+		proficiencyBonus,
+		skillProficiencies,
+	}: CharacterJSON) {
 		this.name = name;
 		this.alignment = alignment;
 		this.backStory = backStory;
@@ -74,6 +74,9 @@ export class Character extends DurableObject<Env> {
 		} else {
 			this.updateStatsAndSkills(stats, skillProficiencies);
 		}
+
+		this.race = race || 'Human';
+		this.skillProficiencies = skillProficiencies;
 	}
 
 	toJSON() {
@@ -88,15 +91,20 @@ export class Character extends DurableObject<Env> {
 			proficiencyBonus: this.proficiencyBonus,
 			skills: this.skills,
 			physicalDescription: this.physicalDescription,
+			race: this.race,
+			skillProficiencies: this.skillProficiencies,
 		};
 	}
 
 	async getImage() {
 		const inputs = {
 			prompt: `Dungeons and Dragons character named ${this.name} 
+       Race: ${this.race}
        Physical description: ${this.physicalDescription} 
        Alignment: ${this.alignment}`,
 		};
+
+		console.log(inputs);
 
 		const response = await this.env.AI.run('@cf/bytedance/stable-diffusion-xl-lightning', inputs);
 
