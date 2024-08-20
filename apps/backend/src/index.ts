@@ -1,243 +1,60 @@
-import { DurableObjectNamespace, DurableObjectState } from '@cloudflare/workers-types';
-import { z } from 'zod';
-import { Dice } from './dice';
-import { Ability, AbilityIndex, SkillIndex, SkillNameToStatNameMap, SkillProficiencySet, StatIndex, StatName } from './charactertypes';
-import { DurableObject, WorkerEntrypoint } from 'cloudflare:workers';
+import { Hono } from 'hono';
+import { Character, characterSchema } from './Character';
+import { zValidator } from '@hono/zod-validator';
+import { Ai } from '@cloudflare/workers-types';
 
-const characterSchema = z.object({
-	name: z.string(),
-	alignment: z.string(),
-	stats: z.any(), // TODO: Add stats schema
-	backStory: z.string(),
-	abilities: z.any(), // TODO: Add ability schema
-	hitPoints: z.number(),
-	movementSpeed: z.number(),
-	skills: z.object({}).passthrough().optional(),
-	proficiencyBonus: z.number().optional(),
-	skillProficiencies: z.any().optional(), // TODO: Add skillProficiencies schema
+export interface Env {
+	CHARACTERS: DurableObjectNamespace<Character>;
+	AI: Ai;
+}
+
+const app = new Hono<{ Bindings: Env }>();
+
+app.get('/character', async (c) => {
+	const characterName = c.req.query('name');
+	if (!characterName) {
+		return c.text('Character name is required', 400);
+	}
+	console.log(characterName);
+
+	const id = c.env.CHARACTERS.idFromName(characterName);
+	const stub = await c.env.CHARACTERS.get(id);
+	stub.initialize("Lil' Tex", 'Chaotic Evil', {}, 'Mock Backstory', {}, 10, 30, 'I look like woody from toy story', 2);
+	return c.json(await stub.toJSON());
 });
 
-/**
- * Welcome to Cloudflare Workers! This is your first Durable Objects application.
- *
- * - Run `npm run dev` in your terminal to start a development server
- * - Open a browser tab at http://localhost:8787/ to see your Durable Object in action
- * - Run `npm run deploy` to publish your application
- *
- * Bind resources to your worker in `wrangler.toml`. After adding bindings, a type definition for the
- * `Env` object can be regenerated with `npm run cf-typegen`.
- *
- * Learn more at https://developers.cloudflare.com/durable-objects
- */
-
-/**
- * Associate bindings declared in wrangler.toml with the TypeScript type system
- */
-export interface Env {
-	// Example binding to KV. Learn more at https://developers.cloudflare.com/workers/runtime-apis/kv/
-	// MY_KV_NAMESPACE: KVNamespace;
-	//
-	// Example binding to Durable Object. Learn more at https://developers.cloudflare.com/workers/runtime-apis/durable-objects/
-	CHARACTERS: DurableObjectNamespace<Character>;
-	//
-	// Example binding to R2. Learn more at https://developers.cloudflare.com/workers/runtime-apis/r2/
-	// MY_BUCKET: R2Bucket;
-	//
-	// Example binding to a Service. Learn more at https://developers.cloudflare.com/workers/runtime-apis/service-bindings/
-	// MY_SERVICE: Fetcher;
-	//
-	// Example binding to a Queue. Learn more at https://developers.cloudflare.com/queues/javascript-apis/
-	// MY_QUEUE: Queue;
-
-	/**
-	 * Encounter class
-	 * Keep track of turn order and current active character
-	 * Keep track of the current scene and the characters in the scene
-	 * -- This will include the grid of the scene and the placement of the characters, obstacles, elevation, etc so that we can calculate
-	 * Keep track of the current round and the actions taken in the current round
-	 */
-	/**
-	 * The Character class represents a character in a Dungeons and Dragons campaign.
-	 *
-	 * Properties:
-	 * - name: string - The name of the character.
-	 * - alignment: string - The alignment of the character (e.g., Lawful Good, Chaotic Evil).
-	 * - stats: object - An object containing the character's stats (e.g., strength, dexterity, constitution, intelligence, wisdom, charisma).
-	 * - backStory: string - A brief back story of the character.
-	 * - abilities: object - An object containing the character's regular and magical abilities.
-	 * - hitPoints: number - The current hit points of the character.
-	 *
-	 * Methods:
-	 * - constructor(name: string, alignment: string, stats: object, backStory: string, abilities: object, hitPoints: number) - Initializes a new character with the given properties.
-	 * - takeDamage(amount: number) - Reduces the character's hit points by the given amount.
-	 * - heal(amount: number) - Increases the character's hit points by the given amount.
-	 * - addAbility(name: string, description: string) - Adds a new ability to the character.
-	 * - removeAbility(name: string) - Removes an ability from the character.
-	 * - updateStats(newStats: object) - Updates the character's stats with the given new stats.
-	 */
-}
-
-export class Character extends DurableObject<Env> {
-	name: string;
-	alignment: string;
-	stats: StatIndex;
-	backStory: string;
-	abilities: AbilityIndex;
-	hitPoints: number;
-	movementSpeed: number;
-	proficiencyBonus: number;
-	skills: SkillIndex;
-
-	constructor(ctx: DurableObjectState, env: Env) {
-		super(ctx, env);
-		this.name = '';
-		this.alignment = '';
-		this.stats = {};
-		this.backStory = '';
-		this.abilities = {};
-		this.hitPoints = 0;
-		this.movementSpeed = 0;
-		this.proficiencyBonus = 2;
-		this.skills = {};
+app.get('/characters/:characterName/image', async (c) => {
+	const characterName = c.req.param('characterName');
+	if (!characterName) {
+		return c.text('Character name is required', 400);
 	}
 
-	initialize(
-		name: string,
-		alignment: string,
-		stats: StatIndex,
-		backStory: string,
-		abilities: AbilityIndex,
-		hitPoints: number,
-		movementSpeed: number,
-		proficiencyBonus?: number,
-		skillProficiencies?: SkillProficiencySet
-	) {
-		this.name = name;
-		this.alignment = alignment;
-		this.backStory = backStory;
-		this.abilities = abilities;
-		this.hitPoints = hitPoints;
-		this.movementSpeed = movementSpeed;
-		if (proficiencyBonus) {
-			this.proficiencyBonus = proficiencyBonus;
-		} else {
-			this.proficiencyBonus = 2;
-		}
+	const id = c.env.CHARACTERS.idFromName(characterName);
+	const stub = await c.env.CHARACTERS.get(id);
+	const image = await stub.getImage();
+	return new Response(image, {
+		status: 200,
+		headers: {
+			'Content-Type': 'image/png',
+		},
+	});
+});
 
-		if (Object.keys(stats).length === 0) {
-			this.randomizeStats(skillProficiencies);
-		} else {
-			this.updateStatsAndSkills(stats, skillProficiencies);
-		}
+app.post('/character', zValidator('json', characterSchema), async (c) => {
+	const { name, alignment, stats, backStory, abilities, hitPoints, movementSpeed, physicalDescription, proficiencyBonus } =
+		c.req.valid('json');
+
+	if (!name) {
+		return c.text('Character name is required', 400);
 	}
 
-	takeDamage(amount: number) {
-		this.hitPoints -= amount;
-	}
+	const id = c.env.CHARACTERS.idFromName(name);
+	const stub = await c.env.CHARACTERS.get(id);
+	await stub.initialize(name, alignment, stats, backStory, abilities, hitPoints, movementSpeed, physicalDescription, proficiencyBonus);
 
-	heal(amount: number) {
-		this.hitPoints += amount;
-	}
+	return c.text('Character created successfully', 201);
+});
 
-	addAbility(ability: Ability) {
-		this.abilities[ability.name] = ability;
-	}
+export default app;
 
-	removeAbility(name: string) {
-		delete this.abilities[name];
-	}
-
-	updateStatsAndSkills(newStats: StatIndex, skillProficiencies?: SkillProficiencySet) {
-		this.stats = { ...this.stats, ...newStats };
-		//for each skill in our map
-		for (const skillName in SkillNameToStatNameMap) {
-			//get the key from the map
-			const skillNameKey = skillName as keyof typeof SkillNameToStatNameMap;
-
-			//we need to calculate proficiency and modify the value up front so we can set both later
-			const isProficient = (skillProficiencies && Object.keys(skillProficiencies).includes(skillNameKey)) as boolean;
-			const drivingStatBonus = this.stats[SkillNameToStatNameMap[skillNameKey]].bonus;
-			const skillBonus = isProficient ? drivingStatBonus + this.proficiencyBonus : drivingStatBonus;
-
-			//set the skill in the skills index based on the proper stat
-			this.skills[skillNameKey] = {
-				//define the driving stat based on the map
-				drivingStat: SkillNameToStatNameMap[skillNameKey],
-				proficient: isProficient,
-				value: skillBonus,
-				passiveValue: skillBonus + 10,
-			};
-		}
-	}
-
-	move(distance: number) {
-		// TODO: Implement the logic for moving the character
-		console.log(`${this.name} moves ${distance} units at a speed of ${this.movementSpeed}.`);
-	}
-
-	updateProficiencyBonus(proficiencyBonus: number) {
-		this.proficiencyBonus = proficiencyBonus;
-	}
-
-	randomizeStats(skillProficiencies?: SkillProficiencySet) {
-		const roll4d6DropWorst = () => {
-			const rolls = [Dice.rolld6(), Dice.rolld6(), Dice.rolld6(), Dice.rolld6()];
-			const minRoll = Math.min(...rolls);
-			return rolls.reduce((accumulator, currentValue) => accumulator + currentValue, 0) - minRoll;
-		};
-		const randomizedStats: StatIndex = {
-			[StatName.STR]: { raw: 10, bonus: 0 },
-			[StatName.DEX]: { raw: 10, bonus: 0 },
-			[StatName.CON]: { raw: 10, bonus: 0 },
-			[StatName.INT]: { raw: 10, bonus: 0 },
-			[StatName.WIS]: { raw: 10, bonus: 0 },
-			[StatName.CHA]: { raw: 10, bonus: 0 },
-		};
-
-		for (const stat in StatName) {
-			const statKey = stat as unknown as StatName;
-			const roll = roll4d6DropWorst();
-			const bonus = Math.floor((roll - 10) / 2);
-			if (randomizedStats[statKey]) {
-				randomizedStats[statKey].raw = roll;
-				randomizedStats[statKey].bonus = bonus;
-			} else {
-				randomizedStats[statKey] = {
-					raw: roll,
-					bonus: bonus,
-				};
-			}
-		}
-
-		this.updateStatsAndSkills(randomizedStats, skillProficiencies);
-	}
-}
-
-export default class DNDPartyWorker extends WorkerEntrypoint<Env> {
-	async fetch(request: Request) {
-		const url = new URL(request.url);
-		const characterName = url.searchParams.get('name');
-		if (!characterName) {
-			return new Response('Character name is required', { status: 400 });
-		}
-
-		const id = this.env.CHARACTERS.idFromName(characterName);
-		const stub = await this.env.CHARACTERS.get(id);
-		return new Response(stub.name);
-	}
-
-	async createCharacter(request: Request) {
-		const parsedData = characterSchema.parse(await request.json());
-		const { name, alignment, stats, backStory, abilities, hitPoints, movementSpeed, proficiencyBonus, skillProficiencies } = parsedData;
-
-		if (!name) {
-			return new Response('Character name is required', { status: 400 });
-		}
-
-		const id = this.env.CHARACTERS.idFromName(name);
-		const stub = await this.env.CHARACTERS.get(id);
-		await stub.initialize(name, alignment, stats, backStory, abilities, hitPoints, movementSpeed, proficiencyBonus, skillProficiencies);
-
-		return new Response('Character created successfully', { status: 201 });
-	}
-}
+export { Character };
