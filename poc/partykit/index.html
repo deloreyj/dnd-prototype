@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PartyKit Chat</title>
+</head>
+<body>
+    <h1>PartyKit WebSocket Chat</h1>
+    <textarea id="log" rows="10" cols="50" readonly></textarea><br>
+    <input type="text" id="message" placeholder="Type a message...">
+    <button onclick="sendMessage()">Send</button>
+
+    <script>
+        const ws = new WebSocket('ws://localhost:8787');
+        ws.onmessage = (event) => {
+            document.getElementById('log').value += event.data + '\n';
+        };
+        
+        function sendMessage() {
+            const message = document.getElementById('message').value;
+            ws.send(message);
+            document.getElementById('message').value = '';
+        }
+    </script>
+</body>
+</html>
